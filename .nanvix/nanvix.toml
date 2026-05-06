@@ -1,0 +1,12 @@
+[package]
+name = "busybox"
+version = "1.36.1"
+nanvix-version = "0.12.521"
+
+[builds]
+[builds.matrix]
+platforms = ["microvm"]
+modes = ["standalone", "single-process", "multi-process"]
+memory = ["128mb"]
+
+[dependencies]

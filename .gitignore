@@ -61,3 +61,17 @@ TAGS
 # user-supplied scripts
 #
 /embed
+
+# Nanvix port files (force-include despite .* rule above)
+!/.nanvix/
+!/.nanvix/**
+!/.github/
+!/.github/**
+
+# Nanvix build artifacts
+nanvix_stubs.o
+busybox.elf
+*.img
+staging/
+test-run/
+.nanvix-configured

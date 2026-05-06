@@ -1,0 +1,9 @@
+*
+!.gitignore
+!z.py
+!_loader.py
+!config.py
+!build.py
+!ramfs.py
+!test.py
+!nanvix.toml

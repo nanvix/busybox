@@ -1,0 +1,176 @@
+# Makefile.nanvix - BusyBox cross-compilation for Nanvix
+#
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+#
+# Usage:
+#   make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/nanvix all
+#
+# Thin cross-compilation wrapper: defconfig, build, install, clean.
+# All other concerns (tests, ramfs, packaging) are handled by the Python
+# modules in .nanvix/ and invoked via ./z.
+
+# Nanvix Docker image for cross-compilation
+NANVIX_DOCKER_IMAGE ?= nanvix/toolchain:latest-minimal
+
+# Platform and deployment configuration
+PLATFORM ?= microvm
+PROCESS_MODE ?= standalone
+MEMORY_SIZE ?= 128mb
+
+# Install prefix baked into the binary
+INSTALL_PREFIX ?= /sysroot
+
+# Nanvix cross-compilation configuration
+ifdef CONFIG_NANVIX
+  NANVIX_TOOLCHAIN ?= /opt/nanvix
+  NANVIX_HOME ?= $(HOME)/nanvix
+
+  # Check if Docker is explicitly requested or native toolchain is not available
+  ifndef CONFIG_NANVIX_DOCKER
+    ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc),)
+      DOCKER_AVAILABLE := $(shell command -v docker 2>/dev/null)
+      ifdef DOCKER_AVAILABLE
+        DOCKER_IMAGE_EXISTS := $(shell docker image inspect $(NANVIX_DOCKER_IMAGE) >/dev/null 2>&1 && echo yes)
+        ifdef DOCKER_IMAGE_EXISTS
+          CONFIG_NANVIX_DOCKER := y
+          $(info [INFO] Native toolchain not found at $(NANVIX_TOOLCHAIN), using Docker image $(NANVIX_DOCKER_IMAGE))
+        else
+          $(error Docker image $(NANVIX_DOCKER_IMAGE) not found. Run: docker pull $(NANVIX_DOCKER_IMAGE))
+        endif
+      else
+        $(error Nanvix toolchain not found at $(NANVIX_TOOLCHAIN) and Docker is not available)
+      endif
+    endif
+  else
+    DOCKER_AVAILABLE := $(shell command -v docker 2>/dev/null)
+    ifndef DOCKER_AVAILABLE
+      $(error CONFIG_NANVIX_DOCKER=y but Docker is not installed)
+    endif
+    DOCKER_IMAGE_EXISTS := $(shell docker image inspect $(NANVIX_DOCKER_IMAGE) >/dev/null 2>&1 && echo yes)
+    ifndef DOCKER_IMAGE_EXISTS
+      $(error Docker image $(NANVIX_DOCKER_IMAGE) not found. Run: docker pull $(NANVIX_DOCKER_IMAGE))
+    endif
+    $(info [INFO] Using Docker image $(NANVIX_DOCKER_IMAGE) (explicitly requested))
+  endif
+
+  EXE=.elf
+
+  ifdef CONFIG_NANVIX_DOCKER
+    DOCKER_TOOLCHAIN_PATH := /opt/nanvix
+    DOCKER_SYSROOT_PATH := /mnt/sysroot
+    DOCKER_WORKSPACE_PATH := /mnt/workspace
+    DOCKER_UID := $(shell id -u)
+    DOCKER_GID := $(shell id -g)
+    DOCKER_RUN := docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
+      -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
+      -v $(abspath $(NANVIX_HOME)):$(DOCKER_SYSROOT_PATH):ro \
+      -w $(DOCKER_WORKSPACE_PATH) \
+      -e HOME=/tmp \
+      $(NANVIX_DOCKER_IMAGE)
+
+    TOOLCHAIN_PREFIX := $(DOCKER_TOOLCHAIN_PATH)
+    SYSROOT_PATH := $(DOCKER_SYSROOT_PATH)
+  else
+    TOOLCHAIN_PREFIX := $(NANVIX_TOOLCHAIN)
+    SYSROOT_PATH := $(abspath $(NANVIX_HOME))
+  endif
+
+  NANVIX_SYSROOT := $(SYSROOT_PATH)
+  export NANVIX_SYSROOT
+else
+  ifneq ($(MAKECMDGOALS),clean)
+    ifneq ($(MAKECMDGOALS),distclean)
+      $(error CONFIG_NANVIX must be set to 'y'. Usage: make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/nanvix)
+    endif
+  endif
+  EXE=.elf
+endif
+
+# Cross-compilation variables for BusyBox
+CROSS_COMPILE := $(TOOLCHAIN_PREFIX)/bin/i686-nanvix-
+NANVIX_CFLAGS := -O2 -fomit-frame-pointer -fno-unwind-tables -fno-asynchronous-unwind-tables -Iinclude/nanvix-compat -I$(SYSROOT_PATH)/include
+
+# Link flags and libraries are baked into configs/nanvix_defconfig via
+# CONFIG_EXTRA_LDFLAGS and CONFIG_EXTRA_LDLIBS. This ensures BusyBox's
+# trylink script handles them correctly (CONFIG_EXTRA_LDLIBS are never
+# dropped during library minimization).
+
+# BusyBox make arguments
+BB_MAKE_ARGS := \
+	CROSS_COMPILE="$(CROSS_COMPILE)" \
+	EXTRA_CFLAGS="$(NANVIX_CFLAGS)" \
+	HOSTCC=gcc
+
+# Marker file to track if defconfig has been applied
+CONFIGURED_MARKER = .nanvix-configured
+
+# Default target
+all: build
+
+# Configure target — apply nanvix_defconfig
+configure: $(CONFIGURED_MARKER)
+
+$(CONFIGURED_MARKER):
+ifdef CONFIG_NANVIX_DOCKER
+	@echo "Running defconfig inside Docker..."
+	$(DOCKER_RUN) $(MAKE) nanvix_defconfig $(BB_MAKE_ARGS)
+else
+	$(MAKE) nanvix_defconfig $(BB_MAKE_ARGS)
+endif
+	touch $(CONFIGURED_MARKER)
+
+# Build target
+build: $(CONFIGURED_MARKER)
+ifdef CONFIG_NANVIX_DOCKER
+	@echo "Compiling nanvix_stubs.o..."
+	$(DOCKER_RUN) $(CROSS_COMPILE)gcc $(NANVIX_CFLAGS) -c nanvix_stubs.c -o nanvix_stubs.o
+	@echo "Building inside Docker..."
+	$(DOCKER_RUN) $(MAKE) -j$$(nproc) busybox $(BB_MAKE_ARGS)
+	@if [ -f busybox ]; then cp -f busybox busybox$(EXE); fi
+	$(DOCKER_RUN) sh -c '\
+		if [ -x "$(DOCKER_TOOLCHAIN_PATH)/bin/i686-nanvix-strip" ]; then \
+			"$(DOCKER_TOOLCHAIN_PATH)/bin/i686-nanvix-strip" --strip-all \
+				"$(DOCKER_WORKSPACE_PATH)/busybox$(EXE)" 2>/dev/null || true; \
+		fi'
+else
+	@echo "Compiling nanvix_stubs.o..."
+	$(CROSS_COMPILE)gcc $(NANVIX_CFLAGS) -c nanvix_stubs.c -o nanvix_stubs.o
+	$(MAKE) -j$$(nproc) busybox $(BB_MAKE_ARGS)
+	@if [ -f busybox ]; then cp -f busybox busybox$(EXE); fi
+	@if [ -x "$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-strip" ]; then \
+		"$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-strip" --strip-all busybox$(EXE) 2>/dev/null || true; \
+	fi
+endif
+
+# Install target — install into DESTDIR
+install: build
+ifdef CONFIG_NANVIX_DOCKER
+	$(DOCKER_RUN) $(MAKE) install $(BB_MAKE_ARGS) CONFIG_PREFIX="$(patsubst $(CURDIR)%,$(DOCKER_WORKSPACE_PATH)%,$(abspath $(DESTDIR)))/sysroot"
+else
+	$(MAKE) install $(BB_MAKE_ARGS) CONFIG_PREFIX="$(DESTDIR)/sysroot"
+endif
+
+# Save defconfig after manual config changes
+savedefconfig:
+ifdef CONFIG_NANVIX_DOCKER
+	$(DOCKER_RUN) $(MAKE) savedefconfig $(BB_MAKE_ARGS)
+else
+	$(MAKE) savedefconfig $(BB_MAKE_ARGS)
+endif
+	cp -f defconfig configs/nanvix_defconfig
+
+# Clean target
+clean:
+	-$(MAKE) clean 2>/dev/null || true
+	rm -f $(CONFIGURED_MARKER)
+	rm -f busybox$(EXE)
+
+# Distclean target
+distclean: clean
+	-$(MAKE) distclean 2>/dev/null || true
+	git clean -fdx -e Makefile.nanvix -e NANVIX.md -e .github \
+		-e .nanvix/ -e configs/nanvix_defconfig \
+		-e z -e z.sh -e z.ps1 2>/dev/null || true
+
+.PHONY: all configure build install savedefconfig clean distclean

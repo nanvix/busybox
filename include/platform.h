@@ -158,7 +158,7 @@
 #if defined(__digital__) && defined(__unix__)
 # include <sex.h>
 #elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) \
-   || defined(__APPLE__)
+   || defined(__APPLE__) || defined(__nanvix__)
 # include <sys/resource.h>  /* rlimit */
 # include <machine/endian.h>
 # define bswap_64 __bswap64
@@ -519,6 +519,20 @@ typedef unsigned smalluint;
 
 #if defined(__NetBSD__)
 # define HAVE_GETLINE 1  /* Recent NetBSD versions have getline() */
+#endif
+
+#if defined(__nanvix__)
+/* Nanvix uses a newlib-based libc with BSD-style headers.
+ * These features are not available or not applicable. */
+# undef HAVE_MNTENT_H
+# undef HAVE_NET_ETHERNET_H
+# undef HAVE_SYS_STATFS_H
+# undef HAVE_XTABS
+# undef HAVE_WAIT3
+# undef HAVE_DEV_FD
+# undef HAVE_UNLOCKED_STDIO
+# undef HAVE_UNLOCKED_LINE_OPS
+# undef HAVE_PRINTF_PERCENTM
 #endif
 
 #if defined(__digital__) && defined(__unix__)
