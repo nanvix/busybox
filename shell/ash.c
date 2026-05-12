@@ -8277,8 +8277,14 @@ tryexec(IF_FEATURE_SH_STANDALONE(int applet_no,) const char *cmd, char **argv, c
 		}
 		/* re-exec ourselves with the new arguments */
 		execve(bb_busybox_exec_path, argv, envp);
-		/* If they called chroot or otherwise made the binary no longer
-		 * executable, fall through */
+		/* If exec failed (e.g., Nanvix kernel heap cannot allocate the
+		 * ELF buffer), fall back to NOEXEC-style in-process execution.
+		 * The child will run the applet function directly and exit. */
+		clearenv();
+		while (*envp)
+			putenv(*envp++);
+		popredir(/*drop:*/ 1);
+		run_noexec_applet_and_exit(applet_no, cmd, argv);
 	}
 #endif
 

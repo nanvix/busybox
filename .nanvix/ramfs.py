@@ -91,10 +91,29 @@ def prepare_staging(
 
     # Create applet symlinks for basic utilities
     applets = [
-        "sh", "ash", "echo", "cat", "ls", "pwd", "true", "false",
-        "mkdir", "rm", "rmdir", "head", "tail", "wc", "grep",
-        "printf", "test", "[", "sleep", "basename", "date", "dd",
-        "mv", "tr", "uname", "yes", "vi", "touch",
+        # Shell
+        "sh", "ash",
+        # Coreutils - NOFORK
+        "arch", "basename", "clear", "dirname", "echo", "false",
+        "fsync", "hostid", "kill", "link", "logname", "mkdir",
+        "nproc", "printenv", "printf", "pwd", "readlink", "realpath",
+        "rmdir", "sync", "test", "[", "[[", "touch", "true",
+        "truncate", "tty", "ttysize", "uname", "unlink", "usleep",
+        "which", "whoami",
+        # Coreutils - NOEXEC/runner
+        "base64", "cal", "cat", "chgrp", "chmod", "chown", "cksum",
+        "cmp", "comm", "cp", "cut", "date", "dd", "diff", "dos2unix",
+        "du", "env", "expand", "expr", "factor", "find", "fold",
+        "groups", "hd", "head", "hexdump", "id", "install", "ln",
+        "ls", "md5sum", "mktemp", "mv", "nl", "od", "paste", "rev",
+        "rm", "seq", "sha1sum", "sha256sum", "sha3sum", "sha512sum",
+        "shred", "shuf", "sleep", "sort", "split", "stat", "strings",
+        "stty", "sum", "tac", "tail", "tee", "timeout", "tr",
+        "unexpand", "uniq", "unix2dos", "wc", "xargs", "xxd", "yes",
+        # Editors
+        "vi",
+        # Search
+        "grep", "egrep", "fgrep", "sed",
     ]
     for applet in applets:
         link = bin_dir / applet

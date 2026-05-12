@@ -40,7 +40,9 @@ test_mod = load_sibling("test", __file__)
 _CFG_LOCAL_NANVIX = "local_nanvix_path"
 
 # Early --with-nanvix extraction via environment variable.
-_EARLY_LOCAL_NANVIX: str | None = os.environ.get("NANVIX_LOCAL_PATH") or None
+_EARLY_LOCAL_NANVIX: str | None = (
+    os.environ.get("WITH_NANVIX") or os.environ.get("NANVIX_LOCAL_PATH") or None
+)
 
 
 class BusyBoxBuild(ZScript):
@@ -53,6 +55,19 @@ class BusyBoxBuild(ZScript):
         """Pre-parse ``--with-nanvix`` and delegate to ZScript.main()."""
         if _EARLY_LOCAL_NANVIX is not None:
             cls._local_nanvix_path = _EARLY_LOCAL_NANVIX
+
+        # The framework requires ``--with-docker IMAGE`` for ``setup``.
+        # When ``--with-nanvix`` is active and ``--with-docker`` was not
+        # explicitly provided, inject the default Docker image so that
+        # the CLI parser accepts the command.
+        argv = sys.argv[1:]
+        if (
+            _EARLY_LOCAL_NANVIX
+            and "setup" in argv
+            and "--with-docker" not in " ".join(argv)
+        ):
+            sys.argv.extend(["--with-docker", config.DOCKER_IMAGE])
+
         super().main(repo_root=repo_root)
 
     # ---- Local Nanvix overlay --------------------------------------------
@@ -97,30 +112,38 @@ class BusyBoxBuild(ZScript):
 
         for name in binaries:
             src = bin_src / name
-            if src.is_file():
-                shutil.copy2(src, bin_dst / name)
+            dst = bin_dst / name
+            if src.is_file() and src.resolve() != dst.resolve():
+                shutil.copy2(src, dst)
                 log.info(f"  Copied {name}")
 
         lib_dst = sysroot_path / "lib"
         lib_dst.mkdir(parents=True, exist_ok=True)
-        lib_src = nanvix_dir / "lib"
 
-        if lib_src.is_dir():
-            for lib_name in ["libposix.a"]:
-                src = lib_src / lib_name
-                if src.is_file():
-                    shutil.copy2(src, lib_dst / lib_name)
-                    log.info(f"  Copied {lib_name}")
+        # Search for libposix.a in multiple locations.
+        libposix_candidates = [
+            nanvix_dir / "lib" / "libposix.a",
+            nanvix_dir / "sysroot-debug" / "lib" / "libposix.a",
+            nanvix_dir / "sysroot-release" / "lib" / "libposix.a",
+        ]
+        for src in libposix_candidates:
+            dst = lib_dst / "libposix.a"
+            if src.is_file() and src.resolve() != dst.resolve():
+                shutil.copy2(src, dst)
+                log.info(f"  Copied libposix.a from {src}")
+                break
 
         # Linker script
         user_ld_candidates = [
             nanvix_dir / "lib" / "user.ld",
+            nanvix_dir / "sysroot-debug" / "lib" / "user.ld",
             nanvix_dir / "sysroot-release" / "lib" / "user.ld",
             nanvix_dir / "build" / "user" / "linker" / "x86" / "user.ld",
         ]
         for candidate in user_ld_candidates:
-            if candidate.is_file():
-                shutil.copy2(candidate, lib_dst / "user.ld")
+            dst = lib_dst / "user.ld"
+            if candidate.is_file() and candidate.resolve() != dst.resolve():
+                shutil.copy2(candidate, dst)
                 log.info(f"  Copied user.ld from {candidate}")
                 break
 
@@ -169,10 +192,22 @@ class BusyBoxBuild(ZScript):
     def _setup_from_local_nanvix(self, local_path: str) -> None:
         """Configure sysroot from a local Nanvix build directory."""
         self.config.set(_CFG_LOCAL_NANVIX, local_path)
-        # Use the local path as sysroot if no other sysroot configured
+
+        # Resolve the actual sysroot directory.  The local Nanvix build
+        # uses sysroot-debug/ (or sysroot-release/) which contains both
+        # libposix.a and user.ld.  Fall back to the root if neither exists.
+        nanvix_dir = Path(local_path)
+        for subdir in ("sysroot-debug", "sysroot-release"):
+            candidate = nanvix_dir / subdir
+            if (candidate / "lib" / "user.ld").is_file():
+                resolved = str(candidate)
+                break
+        else:
+            resolved = local_path
+
         sysroot = self.config.get(CFG_SYSROOT, "")
         if not sysroot:
-            self.config.set(CFG_SYSROOT, local_path)
+            self.config.set(CFG_SYSROOT, resolved)
 
     def build(self) -> None:
         """Cross-compile busybox.elf for Nanvix."""

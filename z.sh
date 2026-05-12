@@ -7,13 +7,15 @@
 
 set -euo pipefail
 
-PINNED_VERSION="0.7.43"
+PINNED_VERSION="0.8.2"
 RAW_ZUTIL_VERSION="${NANVIX_ZUTIL_VERSION:-$PINNED_VERSION}"
 ZUTIL_VERSION="${RAW_ZUTIL_VERSION#v}"
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 VENV="$REPO_ROOT/.nanvix/venv"
 
 # Resolve venv layout (bin/ vs Scripts/) based on what exists on disk.
+# Can be called before venv creation to initialize default paths; call it
+# again after venv creation to pick up the actual layout.
 function _resolve_venv_paths() {
     if [ -d "$VENV/Scripts" ]; then
         VENV_BIN="$VENV/Scripts/nanvix-zutil.exe"
@@ -27,6 +29,8 @@ _resolve_venv_paths
 ZUTIL_GLOBAL_VERSION="$(nanvix-zutil --version 2>/dev/null || true)"
 
 function bootstrap() {
+    # Pin nanvix-zutil version for reproducible bootstrapping.
+    # Override with NANVIX_ZUTIL_VERSION env var if needed.
     echo "nanvix-zutil not found -- bootstrapping nanvix-zutil==${ZUTIL_VERSION}..." >&2
 
     if ! command -v python3 &>/dev/null; then
@@ -40,6 +44,7 @@ function bootstrap() {
     else
         python3 -m venv "$VENV"
     fi
+    # Re-resolve paths now that the venv exists (Scripts/ vs bin/).
     _resolve_venv_paths
     "$VENV_PYTHON" -m pip install --quiet "nanvix-zutil[lint] @ ${WHEEL_URL}"
 }
@@ -52,29 +57,32 @@ if [ ! -d "$VENV" ] && [ -z "$ZUTIL_GLOBAL_VERSION" ]; then
 elif [ -x "$VENV_BIN" ]; then
     VENV_VERSION="$("$VENV_BIN" --version 2>/dev/null || true)"
     if [ "$VENV_VERSION" != "nanvix-zutil ${ZUTIL_VERSION}" ]; then
-        echo "Warning: venv nanvix-zutil version mismatch. Re-bootstrapping..." >&2
+        echo "Warning: venv nanvix-zutil version mismatch. Expected ${ZUTIL_VERSION}, found ${VENV_VERSION}. Re-bootstrapping..." >&2
         bootstrap
     fi
     BIN="$VENV_BIN"
 elif [ -d "$VENV" ] && ! command -v nanvix-zutil &>/dev/null; then
-    echo "Warning: incomplete venv detected. Re-running bootstrap..." >&2
+    echo "Warning: incomplete venv detected (binary missing). Re-running bootstrap..." >&2
     bootstrap
     BIN="$VENV_BIN"
 else
     BIN="nanvix-zutil"
     if [ "$ZUTIL_GLOBAL_VERSION" != "nanvix-zutil ${ZUTIL_VERSION}" ]; then
-        echo "Warning: nanvix-zutil global install version mismatch." >&2
+        echo "Warning: nanvix-zutil global install does not match expected version. Expected ${ZUTIL_VERSION}, found ${ZUTIL_GLOBAL_VERSION}." >&2
     fi
 fi
 
 # Extract --with-nanvix PATH before forwarding to nanvix-zutil.
+# The nanvix-zutil CLI inspects positional args to find the subcommand;
+# --with-nanvix's PATH argument would be mistaken for a subcommand.
+# Pass the value via env var so z.py can pick it up.
 _resolve_nanvix_path() {
     local raw="$1"
     if ! WITH_NANVIX="$(cd -- "$raw" 2>/dev/null && pwd -P)"; then
-        echo "ERROR: --with-nanvix path does not exist: $raw" >&2
+        echo "ERROR: --with-nanvix path does not exist or is not a directory: $raw" >&2
         exit 1
     fi
-    export NANVIX_LOCAL_PATH="$WITH_NANVIX"
+    export WITH_NANVIX
 }
 
 ARGS=()
@@ -98,5 +106,17 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# On Windows (Git Bash / MSYS2) the venv's python.exe is locked while it runs,
+# so the Python distclean command cannot delete it.  Run without exec so the
+# shell can remove the venv after the interpreter exits.
+if [[ "${ARGS[0]:-}" == "distclean" ]]; then
+    "$BIN" "${ARGS[@]}"
+    EC=$?
+    if [ -d "$VENV" ]; then
+        rm -rf "$VENV" 2>/dev/null || true
+    fi
+    exit $EC
+fi
 
 exec "$BIN" "${ARGS[@]}"

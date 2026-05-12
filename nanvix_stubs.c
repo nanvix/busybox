@@ -83,6 +83,12 @@ struct passwd *getpwnam(const char *name)
     return &_stub_pw;
 }
 
+struct passwd *getpwuid(uid_t uid)
+{
+    (void)uid;
+    return &_stub_pw;
+}
+
 /* Environment */
 int clearenv(void)
 {
@@ -145,18 +151,149 @@ char *dirname(char *path)
     return path;
 }
 
-/* Pattern matching stubs - fnmatch, glob, regex */
-#define FNM_NOMATCH 1
+/* Group database stubs */
+#include <grp.h>
+
+static char *_stub_gr_mem[] = { NULL };
+
+static struct group _stub_gr = {
+    .gr_name = "root",
+    .gr_passwd = "",
+    .gr_gid = 0,
+    .gr_mem = _stub_gr_mem
+};
+
+struct group *getgrnam(const char *name)
+{
+    (void)name;
+    return &_stub_gr;
+}
+
+struct group *getgrgid(gid_t gid)
+{
+    (void)gid;
+    return &_stub_gr;
+}
+
+struct group *getgrent(void) { return NULL; }
+void setgrent(void) {}
+void endgrent(void) {}
+
+void setpwent(void) {}
+void endpwent(void) {}
+struct passwd *getpwent(void) { return NULL; }
+
+/* ------------------------------------------------------------------ */
+/* POSIX fnmatch() — handles *, ?, [...], FNM_PATHNAME, FNM_PERIOD   */
+/* ------------------------------------------------------------------ */
+#include <fnmatch.h>
+
+static int _fnmatch_internal(const char *p, const char *s,
+                             const char *s_start, int flags)
+{
+    int negate, matched;
+    char c, sc;
+
+    while ((c = *p++) != '\0') {
+        sc = *s;
+
+        switch (c) {
+        case '?':
+            if (sc == '\0')
+                return FNM_NOMATCH;
+            if ((flags & FNM_PATHNAME) && sc == '/')
+                return FNM_NOMATCH;
+            if ((flags & FNM_PERIOD) && sc == '.' &&
+                (s == s_start ||
+                 ((flags & FNM_PATHNAME) && *(s-1) == '/')))
+                return FNM_NOMATCH;
+            s++;
+            break;
+
+        case '*':
+            /* Collapse consecutive stars */
+            while (*p == '*')
+                p++;
+
+            if ((flags & FNM_PERIOD) && sc == '.' &&
+                (s == s_start ||
+                 ((flags & FNM_PATHNAME) && *(s-1) == '/')))
+                return FNM_NOMATCH;
+
+            /* Trailing star matches everything (respecting FNM_PATHNAME) */
+            if (*p == '\0') {
+                if (flags & FNM_PATHNAME)
+                    return (strchr(s, '/') ? FNM_NOMATCH : 0);
+                return 0;
+            }
+
+            /* Try matching rest of pattern at every position */
+            for (; *s != '\0'; s++) {
+                if ((flags & FNM_PATHNAME) && *s == '/')
+                    break;
+                if (_fnmatch_internal(p, s, s_start,
+                                     flags & ~FNM_PERIOD) == 0)
+                    return 0;
+            }
+            return _fnmatch_internal(p, s, s_start, flags & ~FNM_PERIOD);
+
+        case '[':
+            if (sc == '\0')
+                return FNM_NOMATCH;
+            if ((flags & FNM_PATHNAME) && sc == '/')
+                return FNM_NOMATCH;
+
+            negate = 0;
+            if (*p == '!' || *p == '^') {
+                negate = 1;
+                p++;
+            }
+
+            matched = 0;
+            while ((c = *p++) != '\0' && c != ']') {
+                /* Range: a-z */
+                if (*p == '-' && *(p + 1) != '\0' && *(p + 1) != ']') {
+                    char c2 = *(p + 1);
+                    p += 2;
+                    if ((unsigned char)sc >= (unsigned char)c &&
+                        (unsigned char)sc <= (unsigned char)c2)
+                        matched = 1;
+                } else {
+                    if (sc == c)
+                        matched = 1;
+                }
+            }
+
+            if (c == '\0')
+                return FNM_NOMATCH; /* unterminated bracket */
+
+            if (negate ? matched : !matched)
+                return FNM_NOMATCH;
+            s++;
+            break;
+
+        case '\\':
+            if (!(flags & FNM_NOESCAPE)) {
+                c = *p++;
+                if (c == '\0')
+                    return FNM_NOMATCH;
+            }
+            /* fall through to literal match */
+            /* FALLTHROUGH */
+        default:
+            if (c != sc)
+                return FNM_NOMATCH;
+            s++;
+            break;
+        }
+    }
+
+    return (*s == '\0') ? 0 : FNM_NOMATCH;
+}
+
 int fnmatch(const char *pattern, const char *string, int flags)
 {
-    (void)flags;
-    /* Very simple matching: just do strcmp for exact match */
-    if (strcmp(pattern, string) == 0)
-        return 0;
-    /* Handle '*' wildcard at the simplest level */
-    if (pattern[0] == '*' && pattern[1] == '\0')
-        return 0;
-    return FNM_NOMATCH;
+    return _fnmatch_internal(pattern, string, string, flags);
 }
 
 /* Minimal glob stub */
@@ -220,5 +357,83 @@ void regfree(regex_t *preg)
 int WCOREDUMP(int status)
 {
     (void)status;
+    return 0;
+}
+
+/* Host ID stub */
+long gethostid(void)
+{
+    return 0x007f0101; /* 127.1.1 */
+}
+
+/* Group list stub - used by id applet */
+int getgrouplist(const char *user, gid_t group,
+                 gid_t *groups, int *ngroups)
+{
+    (void)user;
+    if (*ngroups >= 1) {
+        groups[0] = group;
+        *ngroups = 1;
+        return 1;
+    }
+    *ngroups = 1;
+    return -1;
+}
+
+/* Login name stub */
+int getlogin_r(char *buf, size_t bufsize)
+{
+    if (bufsize < 5)
+        return ERANGE;
+    strcpy(buf, "root");
+    return 0;
+}
+
+/* Terminal speed stubs - used by stty */
+#include <termios.h>
+
+speed_t cfgetispeed(const struct termios *tp)
+{
+    return tp ? (tp->c_cflag & 0xf) : B9600;
+}
+
+speed_t cfgetospeed(const struct termios *tp)
+{
+    return tp ? (tp->c_cflag & 0xf) : B9600;
+}
+
+int cfsetispeed(struct termios *tp, speed_t speed)
+{
+    if (tp) tp->c_cflag = (tp->c_cflag & ~0xf) | (speed & 0xf);
+    return 0;
+}
+
+int cfsetospeed(struct termios *tp, speed_t speed)
+{
+    if (tp) tp->c_cflag = (tp->c_cflag & ~0xf) | (speed & 0xf);
+    return 0;
+}
+
+/* sync - flush filesystem buffers */
+void sync(void)
+{
+    /* No global sync on Nanvix; individual fsync is available */
+}
+
+/* wait - wrapper around waitpid */
+pid_t wait(int *wstatus)
+{
+    return waitpid(-1, wstatus, 0);
+}
+
+/* CPU affinity stub - used by nproc via libbb */
+int sched_getaffinity(pid_t pid, size_t cpusetsize, void *mask)
+{
+    (void)pid;
+    /* Set bit 0 to indicate one CPU */
+    if (mask && cpusetsize > 0) {
+        memset(mask, 0, cpusetsize);
+        ((unsigned char *)mask)[0] = 1;
+    }
     return 0;
 }
