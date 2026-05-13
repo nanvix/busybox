@@ -80,6 +80,14 @@ def _build_system_image(
     procd = _find_binary("procd.elf", *bin_search)
     memd = _find_binary("memd.elf", *bin_search)
 
+    # vfsd is optional — include it when available for fork-aware FD tracking.
+    vfsd: Path | None = None
+    for d in bin_search:
+        p = d / "vfsd.elf"
+        if p.is_file():
+            vfsd = p
+            break
+
     busybox = repo_root / f"busybox{config.EXE}"
     if not busybox.is_file():
         raise FileNotFoundError(
@@ -89,15 +97,16 @@ def _build_system_image(
     img = repo_root / ".nanvix" / "busybox-system.img"
     img.parent.mkdir(parents=True, exist_ok=True)
 
-    subprocess.run(
-        [
-            str(mkimage), "-o", str(img),
-            f"{procd};procd",
-            f"{memd};memd",
-            f"{busybox};ash",
-        ],
-        check=True,
-    )
+    mkimage_args = [
+        str(mkimage), "-o", str(img),
+        f"{procd};procd",
+        f"{memd};memd",
+    ]
+    if vfsd is not None:
+        mkimage_args.append(f"{vfsd};vfsd")
+    mkimage_args.append(f"{busybox};ash")
+
+    subprocess.run(mkimage_args, check=True)
     return img
 
 

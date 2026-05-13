@@ -1,0 +1,7 @@
+[2026-05-12 13:49:29.526311 -07:00] INFO [nanvix_terminal::standalone] src/libs/nanvix-terminal/src/standalone.rs:111: spawning VM in standalone terminal mode
+[2026-05-12 13:49:30.628183 -07:00] [38;5;196mERROR[0m [uservm::standalone] src/uservm/src/standalone.rs:514: standalone io_handler: expected bulk frame after WriteRequest, got Some(1)
+[2026-05-12 13:49:30.913565 -07:00] [38;5;196mERROR[0m [uservm::standalone] src/uservm/src/standalone.rs:514: standalone io_handler: expected bulk frame after WriteRequest, got Some(1)
+[2026-05-12 13:49:30.960916 -07:00] [38;5;196mERROR[0m [uservm::standalone] src/uservm/src/standalone.rs:514: standalone io_handler: expected bulk frame after WriteRequest, got Some(1)
+[2026-05-12 13:49:31.241837 -07:00] [38;5;196mERROR[0m [uservm::standalone] src/uservm/src/standalone.rs:514: standalone io_handler: expected bulk frame after WriteRequest, got Some(1)
+[2026-05-12 13:49:31.507509 -07:00] [38;5;196mERROR[0m [uservm::standalone] src/uservm/src/standalone.rs:514: standalone io_handler: expected bulk frame after WriteRequest, got Some(1)
+[2026-05-12 13:49:31.949480 -07:00] [38;5;196mERROR[0m [uservm::standalone] src/uservm/src/standalone.rs:514: standalone io_handler: expected bulk frame after WriteRequest, got Some(1)

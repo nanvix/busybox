@@ -108,6 +108,7 @@ class BusyBoxBuild(ZScript):
             "mkramfs.elf",
             "linuxd.elf",
             "uservm.elf",
+            "vfsd.elf",
         ]
 
         for name in binaries:
