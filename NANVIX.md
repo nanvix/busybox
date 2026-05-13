@@ -1,7 +1,8 @@
 # BusyBox Port for Nanvix
 
 > **TL;DR:** This is a port of BusyBox for the Nanvix operating system, providing a
-> minimal shell and ~105 Unix utilities. Jump to [Quick Start](#quick-start) to get started.
+> minimal shell and ~105 Unix utilities. Jump to [Quick Start](#quick-start) to
+> build, or [Running an Interactive Shell](#running-an-interactive-shell) to try it.
 
 ---
 
@@ -30,6 +31,7 @@ single statically-linked binary containing many common Unix utilities and a shel
 - ✅ Text editors (vi) and search tools (grep, sed)
 - ✅ Hash utilities (md5sum, sha256sum, etc.)
 - ✅ Exec fallback: regular applets transparently fall back to in-process execution
+- ✅ vfsd integration for fork-aware file descriptor tracking
 - ✅ nanvix-zutil integration (`z.sh` / `z.ps1` / `.nanvix/z.py`)
 - ✅ CI/CD integration via reusable workflow
 
@@ -57,9 +59,28 @@ pip install nanvix-zutil
 # 3. Build
 ./z build
 
-# 4. Test
+# 4. Test (runs 45 smoke tests)
 ./z test
 ```
+
+### Building Against a Local Nanvix Checkout
+
+If you have a local Nanvix build (e.g. at `~/src/nanvix/nanvix`), use
+`--with-nanvix` to overlay its binaries into the sysroot:
+
+```bash
+# Setup once — resolves sysroot and overlays local binaries
+./z setup --with-nanvix ~/src/nanvix/nanvix
+
+# Or set the environment variable
+export WITH_NANVIX=~/src/nanvix/nanvix
+./z setup
+./z build
+./z test
+```
+
+The overlay copies `nanvixd.elf`, `kernel.elf`, `mkramfs.elf`, `linuxd.elf`,
+`uservm.elf`, `vfsd.elf`, `libposix.a`, and `user.ld` from the local build.
 
 ### Manual Build (without nanvix-zutil)
 
@@ -81,41 +102,95 @@ make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME"
 
 ## Running on Nanvix
 
-### Using mkimage + ramfs (recommended)
+This section explains how to reproduce running an ash shell on Nanvix, step by
+step. There are two approaches: the automated way using `./z test`, and the
+manual way using mkimage + ramfs directly.
 
-```bash
-# Create a system image with procd + memd + busybox
-mkimage.elf -o system.img \
-  "procd.elf;procd" "memd.elf;memd" "busybox.elf;ash"
+### Prerequisites
 
-# Create a ramfs image with busybox and test files
-mkdir -p staging/bin staging/tmp
-cp busybox.elf staging/bin/
-mkramfs.elf -o ramfs.img staging/
-
-# Start an interactive ash shell with ramfs
-nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
-
-# Pipe commands to the shell
-echo "echo hello" | nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
-```
-
-### Building Nanvix with fork support
+You need a working Nanvix build with fork support. Either download a pre-built
+sysroot via `./z setup`, or build Nanvix from source:
 
 ```bash
 cd nanvix/
-make all DEPLOYMENT_MODE=standalone MACHINE=microvm RELEASE=no FEATURES=fork
-make install DEPLOYMENT_MODE=standalone MACHINE=microvm RELEASE=no FEATURES=fork
+make all DEPLOYMENT_MODE=standalone MACHINE=microvm
 ```
 
-### Interactive Shell
+After building, the following binaries should exist in `nanvix/bin/`:
 
-Once booted into ash, all applet categories work:
+| Binary | Description |
+|--------|-------------|
+| `nanvixd.elf` | Nanvix hypervisor — boots the guest OS |
+| `kernel.elf` | Nanvix microkernel |
+| `mkimage.elf` | Utility to create multi-binary system images |
+| `mkramfs.elf` | Utility to create ramfs filesystem images |
+| `procd.elf` | Process management daemon |
+| `memd.elf` | Memory management daemon |
+| `vfsd.elf` | Virtual filesystem daemon (fork-aware FD tracking) |
+
+### Running an Interactive Shell
+
+#### Step 1: Create a System Image
+
+A system image bundles the daemons and the shell into one bootable payload.
+The format is `"binary_path;process_name"` pairs passed to `mkimage`:
+
+```bash
+# Minimal image (procd + memd + ash)
+mkimage.elf -o system.img \
+  "procd.elf;procd" \
+  "memd.elf;memd" \
+  "busybox.elf;ash"
+
+# Recommended: include vfsd for fork-aware FD tracking
+mkimage.elf -o system.img \
+  "procd.elf;procd" \
+  "memd.elf;memd" \
+  "vfsd.elf;vfsd" \
+  "busybox.elf;ash"
+```
+
+> **Note:** `procd` must be listed first (it is the init process), followed by
+> `memd`, then optional daemons like `vfsd`, and finally the user program (`ash`).
+
+#### Step 2: Create a Ramfs Image
+
+The ramfs image provides the filesystem visible to the guest. Place the busybox
+binary at `/bin/busybox.elf` so that ash can find and exec applets:
+
+```bash
+mkdir -p staging/bin staging/tmp
+
+# Copy busybox binary
+cp busybox.elf staging/bin/busybox.elf
+
+# Optional: add test fixture files
+echo "hello world" > staging/tmp/hello.txt
+printf "cherry\napple\nbanana\n" > staging/tmp/fruits.txt
+
+# Create the ramfs image
+mkramfs.elf -o ramfs.img staging/
+```
+
+#### Step 3: Boot the Shell
+
+```bash
+# Interactive mode — type commands at the "# " prompt
+nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
+
+# Pipe mode — pipe commands to stdin (useful for scripting/testing)
+echo "echo hello; ls /bin" | nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
+```
+
+The `-bin-dir` flag tells nanvixd where to find `kernel.elf`. The `--` separates
+nanvixd flags from the system image path.
+
+#### Step 4: Try Some Commands
 
 ```
 # echo Hello from BusyBox on Nanvix     (shell builtin)
 Hello from BusyBox on Nanvix
-# basename /usr/local/bin/myapp          (NOFORK)
+# basename /usr/local/bin/myapp          (NOFORK — no fork needed)
 myapp
 # ls /tmp                                (NOEXEC — fork, no exec)
 hello.txt  fruits.txt
@@ -129,9 +204,121 @@ cherry
 apple
 # wc /tmp/hello.txt                      (regular — fork + exec fallback)
       1       2      12 /tmp/hello.txt
+# seq 5                                  (regular — sequence generator)
+1
+2
+3
+4
+5
 # echo $((6 * 7))                        (shell arithmetic)
 42
+# uname                                  (NOFORK — OS name)
+nanvix
 ```
+
+> **Tip:** nanvixd does not exit when stdin reaches EOF — interactive sessions
+> and piped commands will time out after the guest finishes. This is expected
+> behavior. The test harness handles this with a 15-second timeout.
+
+### All-in-One: `./z test`
+
+The simplest way to validate the full stack is:
+
+```bash
+# Build BusyBox and run all 45 smoke tests
+./z setup --with-nanvix ~/src/nanvix/nanvix
+./z build
+./z test
+```
+
+This automatically:
+1. Creates a system image with `procd + memd + vfsd + ash`
+2. Creates a ramfs with busybox and test fixture files
+3. Runs 45 smoke tests across all applet categories
+4. Reports pass/fail results
+
+---
+
+## Architecture
+
+### System Image Layout
+
+The system image contains a multi-binary initrd. On boot, `nanvixd` loads the
+kernel, which then starts each binary in order:
+
+```
+┌─────────────────────────────────────────────┐
+│  System Image (created by mkimage)          │
+│                                             │
+│  1. procd.elf  — process manager daemon     │
+│  2. memd.elf   — memory manager daemon      │
+│  3. vfsd.elf   — virtual filesystem daemon  │
+│  4. ash (busybox.elf) — user shell          │
+└─────────────────────────────────────────────┘
+```
+
+### Daemon Roles
+
+| Daemon | Role |
+|--------|------|
+| **procd** | Process lifecycle: fork, exec, waitpid, exit. Manages the process table and coordinates fork notifications to registered resource servers. |
+| **memd** | Memory management: page allocation, virtual memory. |
+| **vfsd** | Virtual filesystem daemon: receives fork notifications from procd and tracks child→parent relationships for file descriptor management. |
+
+### Fork Flow (Suspended Fork)
+
+When ash runs a NOEXEC or regular applet, it calls `fork()`. The fork flow is:
+
+```
+ash (parent)
+  │
+  ├── 1. fork() → sends ForkRequest to procd
+  │
+  ├── procd receives ForkRequest
+  │     ├── 2. Calls kernel fork_process_suspended(parent_pid)
+  │     │     └── Kernel creates child with deep-copied address space
+  │     │         but does NOT place it on the ready queue (suspended)
+  │     │
+  │     ├── 3. Notifies registered servers (vfsd) via ForkNotify message
+  │     │     └── vfsd records child→parent mapping, responds OK
+  │     │
+  │     ├── 4. Calls kernel resume_forked_process(child_pid)
+  │     │     └── Kernel moves child from fork_pending → ready queue
+  │     │
+  │     └── 5. Sends ForkResponse(child_pid) to parent
+  │
+  ├── Parent: receives child_pid, continues
+  │
+  └── Child: wakes up, runs applet function, exits
+```
+
+The suspended fork mechanism ensures that resource servers (like vfsd) are
+notified and have completed their bookkeeping **before** the child process
+starts executing. This prevents IPC message stream contamination.
+
+### Applet Execution Model
+
+| Type | Mechanism | Fork? | Exec? | Status |
+|------|-----------|-------|-------|--------|
+| **Shell builtin** | Runs inside ash | No | No | ✅ Works |
+| **NOFORK** | Runs inside ash process | No | No | ✅ Works |
+| **NOEXEC** | Fork child, call applet function | Yes | No | ✅ Works |
+| **Regular** | Fork child, exec fails → NOEXEC fallback | Yes | No* | ✅ Works |
+
+\* Regular applets attempt `execve(/bin/busybox.elf)` which fails due to kernel
+heap limits. The patched ash (`shell/ash.c`) automatically falls back to
+NOEXEC-style in-process execution in the forked child. This is transparent to
+the user.
+
+### VFS File Descriptors
+
+- VFS FDs start at 1024 (`VFS_FD_BASE` in `config/src/fds.rs`).
+- FDs 0–2 are kernel console (IKC — inter-kernel communication).
+- The VFS library (`src/libs/vfs/`) uses a global static `FD_TABLE` with 64 slots.
+- After `fork()` with `deep_clone_vmem`, the child inherits an independent copy
+  of the entire VFS state (including the FD table) via memory cloning.
+- `vfsd` tracks fork relationships so that future per-FD operations can be
+  coordinated across parent and child.
 
 ---
 
@@ -217,6 +404,46 @@ The `include/nanvix-compat/` directory provides compatibility headers:
 
 ---
 
+## Test Suite
+
+The smoke test suite (`.nanvix/test.py`) runs 45 tests across all applet
+categories. Each test pipes a shell command to ash and checks the output.
+
+### Running Tests
+
+```bash
+# Automated (recommended)
+./z test
+
+# Or manually specify the Nanvix build
+WITH_NANVIX=~/src/nanvix/nanvix ./z test
+```
+
+### Test Categories
+
+| Category | Count | Examples |
+|----------|-------|---------|
+| Shell builtins | 9 | echo, printf, true/false, variables, arithmetic, test |
+| NOFORK applets | 8 | basename, dirname, nproc, realpath, uname, usleep, logname |
+| NOEXEC applets | 14 | env, id, date, ls, head, cut, sort, expr, cp, mkdir, rm |
+| Regular applets | 14 | cat, wc, tail, grep -F, cmp, nl, od, rev, strings, factor, seq, du, diff, uniq |
+
+### Expected Output
+
+```
+  PASS: Test 1: echo
+  PASS: Test 2: printf
+  ...
+  PASS: Test 44: diff --help
+  PASS: Test 45: uniq --help
+
+==================================================
+Results: 45/45 passed, 0 failed
+==================================================
+```
+
+---
+
 ## Changes Summary
 
 ### Nanvix-Specific Files
@@ -230,7 +457,7 @@ The `include/nanvix-compat/` directory provides compatibility headers:
 | `include/platform.h` | Modified: Nanvix platform detection |
 | `Makefile` | Modified: Fix CONFIG_EXTRA_LDLIBS quoting |
 | `shell/ash.c` | Modified: Exec fallback — when `execve()` fails, regular applets fall back to NOEXEC-style in-process execution |
-| `.nanvix/z.py` | ZScript subclass (build orchestration) |
+| `.nanvix/z.py` | ZScript subclass (build orchestration, local Nanvix overlay) |
 | `.nanvix/nanvix.toml` | Package manifest |
 | `.nanvix/config.py` | Shared configuration constants |
 | `.nanvix/build.py` | Build orchestration logic |
@@ -260,18 +487,39 @@ The `include/nanvix-compat/` directory provides compatibility headers:
 | **No user database** | `whoami` returns "unknown uid 0" (libposix getpwuid has no user DB) |
 | **Static linking only** | Required by Nanvix |
 
-### Applet Execution Model
+---
 
-| Type | Mechanism | Fork? | Exec? | Status |
-|------|-----------|-------|-------|--------|
-| **Shell builtin** | Runs inside ash | No | No | ✅ Works |
-| **NOFORK** | Runs inside ash process | No | No | ✅ Works |
-| **NOEXEC** | Fork child, call applet function | Yes | No | ✅ Works |
-| **Regular** | Fork child, exec fails → NOEXEC fallback | Yes | No* | ✅ Works |
+## Troubleshooting
 
-\* Regular applets attempt `execve(/bin/busybox.elf)` which fails due to kernel
-heap limits. The patched ash automatically falls back to NOEXEC-style in-process
-execution in the forked child. This is transparent to the user.
+### `vfsd.elf not found` Warning
+
+If vfsd.elf is not found in the sysroot, the test system builds the system image
+without it. Fork still works, but without FD tracking. To fix:
+
+```bash
+# Rebuild Nanvix (vfsd is built automatically)
+cd nanvix/ && make all DEPLOYMENT_MODE=standalone MACHINE=microvm
+
+# Re-overlay
+./z setup --with-nanvix ~/src/nanvix/nanvix
+```
+
+### Test Timeouts
+
+Each test has a 15-second timeout. If nanvixd hangs, check:
+- Is `kernel.elf` in the bin directory? (`-bin-dir` flag)
+- Is the system image valid? (rebuild with `mkimage.elf`)
+- Does the Nanvix build have fork support enabled?
+
+### Build Fails with Missing `libposix.a`
+
+Run `./z setup` to download the sysroot, or point to a local Nanvix build:
+
+```bash
+./z setup --with-nanvix ~/src/nanvix/nanvix
+```
+
+The setup resolves `libposix.a` from `sysroot-debug/lib/` or `sysroot-release/lib/`.
 
 ---
 
