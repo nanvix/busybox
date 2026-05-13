@@ -108,27 +108,49 @@ manual way using mkimage + ramfs directly.
 
 ### Prerequisites
 
-You need a working Nanvix build with fork support. Either download a pre-built
-sysroot via `./z setup`, or build Nanvix from source:
+You need a working Nanvix build with fork support and a compiled `busybox.elf`.
+
+**Build Nanvix** (if not already built):
 
 ```bash
-cd nanvix/
+cd ~/src/nanvix/nanvix
 make all DEPLOYMENT_MODE=standalone MACHINE=microvm
 ```
 
-After building, the following binaries should exist in `nanvix/bin/`:
+**Build BusyBox** (if not already built):
 
-| Binary | Description |
-|--------|-------------|
-| `nanvixd.elf` | Nanvix hypervisor — boots the guest OS |
-| `kernel.elf` | Nanvix microkernel |
-| `mkimage.elf` | Utility to create multi-binary system images |
-| `mkramfs.elf` | Utility to create ramfs filesystem images |
-| `procd.elf` | Process management daemon |
-| `memd.elf` | Memory management daemon |
-| `vfsd.elf` | Virtual filesystem daemon (fork-aware FD tracking) |
+```bash
+cd ~/src/nanvix/usr/bin/busybox
+./z setup --with-nanvix ~/src/nanvix/nanvix
+./z build
+```
 
-### Running an Interactive Shell
+After both builds, you should have:
+
+| Binary | Location |
+|--------|----------|
+| `nanvixd.elf` | `~/src/nanvix/nanvix/bin/nanvixd.elf` |
+| `kernel.elf` | `~/src/nanvix/nanvix/bin/kernel.elf` |
+| `mkimage.elf` | `~/src/nanvix/nanvix/bin/mkimage.elf` |
+| `mkramfs.elf` | `~/src/nanvix/nanvix/bin/mkramfs.elf` |
+| `procd.elf` | `~/src/nanvix/nanvix/bin/procd.elf` |
+| `memd.elf` | `~/src/nanvix/nanvix/bin/memd.elf` |
+| `vfsd.elf` | `~/src/nanvix/nanvix/bin/vfsd.elf` |
+| `busybox.elf` | `~/src/nanvix/usr/bin/busybox/busybox.elf` |
+
+### Running an Interactive Shell (Manual)
+
+All commands below run from the **Nanvix root directory** (where `bin/` lives):
+
+```bash
+cd ~/src/nanvix/nanvix
+```
+
+Set a shorthand for the BusyBox binary path:
+
+```bash
+BUSYBOX=~/src/nanvix/usr/bin/busybox/busybox.elf
+```
 
 #### Step 1: Create a System Image
 
@@ -136,22 +158,18 @@ A system image bundles the daemons and the shell into one bootable payload.
 The format is `"binary_path;process_name"` pairs passed to `mkimage`:
 
 ```bash
-# Minimal image (procd + memd + ash)
-mkimage.elf -o system.img \
-  "procd.elf;procd" \
-  "memd.elf;memd" \
-  "busybox.elf;ash"
-
 # Recommended: include vfsd for fork-aware FD tracking
-mkimage.elf -o system.img \
-  "procd.elf;procd" \
-  "memd.elf;memd" \
-  "vfsd.elf;vfsd" \
-  "busybox.elf;ash"
+./bin/mkimage.elf -o system.img \
+  "./bin/procd.elf;procd" \
+  "./bin/memd.elf;memd" \
+  "./bin/vfsd.elf;vfsd" \
+  "$BUSYBOX;ash"
 ```
 
 > **Note:** `procd` must be listed first (it is the init process), followed by
 > `memd`, then optional daemons like `vfsd`, and finally the user program (`ash`).
+> You can omit the `vfsd.elf` line for a minimal image (fork still works, but
+> without FD tracking).
 
 #### Step 2: Create a Ramfs Image
 
@@ -162,24 +180,24 @@ binary at `/bin/busybox.elf` so that ash can find and exec applets:
 mkdir -p staging/bin staging/tmp
 
 # Copy busybox binary
-cp busybox.elf staging/bin/busybox.elf
+cp "$BUSYBOX" staging/bin/busybox.elf
 
 # Optional: add test fixture files
 echo "hello world" > staging/tmp/hello.txt
 printf "cherry\napple\nbanana\n" > staging/tmp/fruits.txt
 
 # Create the ramfs image
-mkramfs.elf -o ramfs.img staging/
+./bin/mkramfs.elf -o ramfs.img staging/
 ```
 
 #### Step 3: Boot the Shell
 
 ```bash
 # Interactive mode — type commands at the "# " prompt
-nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
+./bin/nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
 
 # Pipe mode — pipe commands to stdin (useful for scripting/testing)
-echo "echo hello; ls /bin" | nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
+echo "echo hello; ls /bin" | ./bin/nanvixd.elf -bin-dir ./bin -ramfs ramfs.img -- system.img
 ```
 
 The `-bin-dir` flag tells nanvixd where to find `kernel.elf`. The `--` separates
@@ -222,9 +240,11 @@ nanvix
 
 ### All-in-One: `./z test`
 
-The simplest way to validate the full stack is:
+The simplest way to validate the full stack — run from the **BusyBox directory**:
 
 ```bash
+cd ~/src/nanvix/usr/bin/busybox
+
 # Build BusyBox and run all 45 smoke tests
 ./z setup --with-nanvix ~/src/nanvix/nanvix
 ./z build
