@@ -101,19 +101,26 @@ Nanvix's SDK libc now provides the POSIX declarations and implementations used
 by this port directly. No local libc stubs or shadow compatibility headers are
 linked into BusyBox.
 
-## Runtime Notes
+## Known Issues
 
-BusyBox is installed as `/bin/busybox` in test ramfs images. Ash prefers
-in-process BusyBox applets. If Nanvix cannot re-exec the multicall binary, the
-Nanvix-only ash fallback runs the selected applet from the forked address
-space; non-Nanvix behavior remains unchanged.
+The port contains the following workarounds for current Nanvix, SDK, and CI
+limitations:
 
-Current kernel constraints relevant to BusyBox are:
+| Issue | Workaround |
+| --- | --- |
+| Re-executing `/bin/busybox` may fail after `fork()` | The Nanvix-only path in `shell/ash.c` runs the selected applet from the cloned address space. Non-Nanvix behavior is unchanged. |
+| Applets such as `env`, `timeout`, `xargs`, and `find -exec` launch secondary commands through `BB_EXECVP()` | The Nanvix path in `libbb/executable.c` falls back to in-process applet dispatch when BusyBox self-exec fails. |
+| BusyBox assumes mount tables, `statfs`, `wait3`, `/dev/fd`, Ethernet headers, and `%m` printf support | `include/platform.h` disables those capability assumptions for `__nanvix__` and uses the SDK's endian and byte-swap headers. |
+| Kconfig string quoting can pass `CONFIG_EXTRA_LDLIBS=""` to `scripts/trylink` as a library name | The top-level `Makefile` removes Kconfig quotes before invoking `trylink`. |
+| zutils traditionally expects `libposix.a` and `user.ld` in the downloaded sysroot | The Nanvix SDK now owns libc and the linker script, so `.nanvix/z.py` treats the downloaded sysroot as runtime-only and verifies only runtime binaries. |
+| Shell pipelines and command substitution are not reliable enough for the upstream test harness | The staged test harness replaces its stdin pipeline with temporary-file redirection and a subshell, preserving the original isolation semantics. Tests that inherently require pipelines or command substitution are excluded. |
+| Symbolic and hard links return `ENOTSUP`; `/dev/full` and `/dev/zero` semantics are unavailable | Tests requiring those facilities are excluded. Ramfs images rely on ash standalone dispatch instead of applet symlinks and provide a regular empty `/dev/null` test fixture. |
+| GitHub artifact transfer excludes hidden files, and Windows checkouts may use CRLF line endings | The target configuration is staged as `busybox.config`, explicitly included with `busybox.links`, and generated or selected shell scripts are normalized to LF before ramfs creation. |
+| Nanvix SDK `v0.19.17-sdk.1` installed `/opt/nanvix/bin` with root-only directory permissions | The port pins `v0.19.17-sdk.2`, which contains the upstream non-root permission fix required by zutils and CI. |
+| Nanvix supports only static ELF executables | `configs/nanvix_defconfig` enables static linking and disables shared or individual BusyBox builds. |
 
-- pipelines are not yet reliable enough for the upstream shell test harness;
-- symbolic and hard links return `ENOTSUP`;
-- `/proc`, mount tables, and filesystem-stat interfaces are unavailable;
-- dynamic linking is unsupported.
+These workarounds should be removed when the corresponding Nanvix facilities
+or upstream build interfaces become available.
 
 ## CI
 
