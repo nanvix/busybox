@@ -39,8 +39,8 @@ function bootstrap() {
     local python
     if command -v python3.12 &>/dev/null; then
         python="python3.12"
-    elif command -v python3 &>/dev/null \
-        && python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))'; then
+    elif command -v python3 &>/dev/null &&
+        python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))'; then
         python="python3"
     else
         echo "Error: Python 3.12 or newer is required by nanvix-zutil." >&2
