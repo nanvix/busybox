@@ -392,7 +392,7 @@ class BusyBoxTests:
                 )
 
             runner = suite / "nanvix-runtest"
-            script = [
+            common_script = [
                 "#!/bin/sh",
                 "cd /testsuite || exit 1",
                 "export PATH=/bin",
@@ -455,13 +455,27 @@ class BusyBoxTests:
                 "  fi",
                 "}",
             ]
+            smoke_runner = suite / "nanvix-smoke"
+            smoke_script = list(common_script)
             for name, command, expected in _SMOKE_CASES:
-                script.append(
+                smoke_script.append(
                     "run_smoke "
                     f"{shlex.quote(name)} "
                     f"{shlex.quote(command)} "
                     f"{shlex.quote(expected)}"
                 )
+            smoke_script.extend(
+                [
+                    'echo "Nanvix BusyBox smoke tests: '
+                    f'{len(_SMOKE_CASES)} smoke, $failed failed"',
+                    'test "$failed" -eq 0',
+                ]
+            )
+            smoke_runner.write_text(
+                "\n".join(smoke_script) + "\n", encoding="ascii", newline="\n"
+            )
+
+            script = list(common_script)
             for testcase in testcases:
                 relative = testcase.relative_to(ramfs_root)
                 script.append(f"run_test '/{relative.as_posix()}'")
@@ -470,8 +484,8 @@ class BusyBoxTests:
                 script.append(f"run_new_test '/{relative.as_posix()}'")
             script.extend(
                 [
-                    'echo "Nanvix BusyBox tests: '
-                    f"{len(_SMOKE_CASES)} smoke, {len(testcases)} legacy, "
+                    'echo "Nanvix BusyBox upstream tests: '
+                    f"{len(testcases)} legacy, "
                     f'{len(new_testcases)} suites, $failed failed"',
                     'test "$failed" -eq 0',
                 ]
@@ -487,16 +501,19 @@ class BusyBoxTests:
                 str(ramfs_root),
             )
 
-            initrd = make_initrd(
-                self.script,
-                binary,
-                test_out(),
-                args=InitRdArgs(app_args=["ash", "/testsuite/nanvix-runtest"]),
-            )
-            try:
-                self._run_guest(initrd, ramfs=ramfs, timeout=600)
-            finally:
-                initrd.unlink(missing_ok=True)
+            for guest_runner in (smoke_runner, runner):
+                initrd = make_initrd(
+                    self.script,
+                    binary,
+                    test_out(),
+                    args=InitRdArgs(
+                        app_args=["ash", f"/testsuite/{guest_runner.name}"]
+                    ),
+                )
+                try:
+                    self._run_guest(initrd, ramfs=ramfs, timeout=600)
+                finally:
+                    initrd.unlink(missing_ok=True)
         log.success(
             f"PASS: {len(_SMOKE_CASES)} applet smoke tests and "
             f"{len(testcases)} legacy tests plus {len(new_testcases)} "
