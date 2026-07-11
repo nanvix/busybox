@@ -1,0 +1,65 @@
+# Copyright(c) The Maintainers of Nanvix.
+# Licensed under the MIT License.
+
+.DEFAULT_GOAL := all
+
+NANVIX_TOOLCHAIN ?= /opt/nanvix
+OUT_DIR ?= .nanvix/out
+BIN_OUT ?= $(OUT_DIR)/release/bin
+TEST_OUT ?= $(OUT_DIR)/test
+JOBS ?= $(shell nproc)
+
+NANVIX_CONFIG := configs/nanvix_defconfig
+CONFIGURED_MARKER := .nanvix-configured
+SDK_MANIFEST := $(NANVIX_TOOLCHAIN)/nanvix-sdk.json
+BUSYBOX_ELF := busybox.elf
+
+_GOALS := $(or $(MAKECMDGOALS),$(.DEFAULT_GOAL))
+ifneq ($(filter-out clean,$(_GOALS)),)
+  ifeq ($(wildcard $(SDK_MANIFEST)),)
+    $(error Nanvix SDK not found at $(NANVIX_TOOLCHAIN))
+  endif
+  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/clang),)
+    $(error Nanvix SDK Clang not found at $(NANVIX_TOOLCHAIN)/bin/clang)
+  endif
+endif
+
+export PATH := $(NANVIX_TOOLCHAIN)/bin:$(PATH)
+
+BUSYBOX_MAKE_ARGS := \
+	ARCH=i386 \
+	CROSS_COMPILE= \
+	HOSTCC=gcc \
+	CC=clang \
+	LD=ld.lld \
+	AS=clang \
+	AR=llvm-ar \
+	NM=llvm-nm \
+	STRIP=llvm-strip \
+	OBJCOPY=llvm-objcopy \
+	OBJDUMP=llvm-objdump
+
+all: build
+
+configure: $(CONFIGURED_MARKER)
+
+$(CONFIGURED_MARKER): $(NANVIX_CONFIG) .nanvix/Makefile.nanvix
+	$(MAKE) nanvix_defconfig $(BUSYBOX_MAKE_ARGS)
+	touch $@
+
+build: configure
+	$(MAKE) -j$(JOBS) busybox busybox.links $(BUSYBOX_MAKE_ARGS)
+	cp -f busybox $(BUSYBOX_ELF)
+	rm -rf $(OUT_DIR)/bin $(BIN_OUT) $(TEST_OUT)
+	mkdir -p $(OUT_DIR)/bin $(BIN_OUT) $(TEST_OUT)
+	cp -f $(BUSYBOX_ELF) $(OUT_DIR)/bin/busybox.elf
+	cp -f $(BUSYBOX_ELF) $(BIN_OUT)/busybox.elf
+	cp -f $(BUSYBOX_ELF) busybox.links $(TEST_OUT)/
+	cp -f .config $(TEST_OUT)/busybox.config
+
+clean:
+	-$(MAKE) clean $(BUSYBOX_MAKE_ARGS)
+	rm -f $(CONFIGURED_MARKER) $(BUSYBOX_ELF)
+	rm -rf $(OUT_DIR)
+
+.PHONY: all build clean configure

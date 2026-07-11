@@ -61,3 +61,17 @@ TAGS
 # user-supplied scripts
 #
 /embed
+
+# Nanvix port infrastructure
+!/.nanvix/
+!/.nanvix/**
+!/.github/
+!/.github/**
+!/.zutils-version
+
+# Nanvix build artifacts
+/busybox.elf
+/*.img
+/staging/
+/test-run/
+/.nanvix-configured

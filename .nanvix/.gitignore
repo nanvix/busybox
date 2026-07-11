@@ -1,0 +1,10 @@
+__pycache__
+venv
+cache
+sysroot
+buildroot
+out
+.yamllint.yml
+black.toml
+env.json
+pyrightconfig.json

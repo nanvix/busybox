@@ -8266,8 +8266,21 @@ tryexec(IF_FEATURE_SH_STANDALONE(int applet_no,) const char *cmd, char **argv, c
 		}
 		/* re-exec ourselves with the new arguments */
 		execve(bb_busybox_exec_path, argv, envp);
+#if defined(__nanvix__)
+		/*
+		 * Nanvix cannot yet load the BusyBox ELF image through execve().
+		 * The child can still run the selected applet from its cloned
+		 * address space.
+		 */
+		clearenv();
+		while (*envp)
+			putenv(*envp++);
+		popredir(/*drop:*/ 1);
+		run_noexec_applet_and_exit(applet_no, cmd, argv);
+#else
 		/* If they called chroot or otherwise made the binary no longer
 		 * executable, fall through */
+#endif
 	}
 #endif
 

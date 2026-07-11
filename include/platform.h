@@ -157,6 +157,10 @@
 #include <limits.h>
 #if defined(__digital__) && defined(__unix__)
 # include <sex.h>
+#elif defined(__nanvix__)
+# include <sys/resource.h>
+# include <byteswap.h>
+# include <endian.h>
 #elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) \
    || defined(__APPLE__)
 # include <sys/resource.h>  /* rlimit */
@@ -519,6 +523,17 @@ typedef unsigned smalluint;
 
 #if defined(__NetBSD__)
 # define HAVE_GETLINE 1  /* Recent NetBSD versions have getline() */
+#endif
+
+#if defined(__nanvix__)
+/* Interfaces not provided by the Nanvix SDK or kernel. */
+# undef HAVE_MNTENT_H
+# undef HAVE_NET_ETHERNET_H
+# undef HAVE_SYS_STATFS_H
+# undef HAVE_WAIT3
+# undef HAVE_DEV_FD
+# define HAVE_DEV_FD 0
+# undef HAVE_PRINTF_PERCENTM
 #endif
 
 #if defined(__digital__) && defined(__unix__)

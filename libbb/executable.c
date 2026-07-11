@@ -78,8 +78,15 @@ int FAST_FUNC executable_exists(const char *filename)
 /* just like the real execvp, but try to launch an applet named 'file' first */
 int FAST_FUNC BB_EXECVP(const char *file, char *const argv[])
 {
-	if (find_applet_by_name(file) >= 0)
+	int applet_no = find_applet_by_name(file);
+
+	if (applet_no >= 0) {
 		execvp(bb_busybox_exec_path, argv);
+# if defined(__nanvix__)
+		/* Nanvix can run the applet from the cloned process if re-exec fails. */
+		run_noexec_applet_and_exit(applet_no, file, (char**)argv);
+# endif
+	}
 	return execvp(file, argv);
 }
 #endif
