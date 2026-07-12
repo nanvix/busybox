@@ -7,6 +7,6 @@ nanvix-version = "0.19.17"
 [builds.matrix]
 platforms = ["microvm"]
 modes = ["standalone"]
-memory = ["128mb", "256mb"]
+memory = ["256mb"]
 
 [dependencies]
