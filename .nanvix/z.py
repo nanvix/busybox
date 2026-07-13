@@ -18,8 +18,6 @@ from nanvix_zutil import (
 )
 from nanvix_zutil.paths import bin_out, out_dir, repo_root, test_out
 
-NANVIX_SDK_IMAGE = "ghcr.io/nanvix/nanvix-sdk-c-clang:v0.19.17-sdk.2"
-
 
 class BusyBoxBuild(ZScript):
     """Build BusyBox with the pinned Nanvix C SDK."""
