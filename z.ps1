@@ -15,10 +15,29 @@ $ErrorActionPreference = 'Stop'
 # instead of relying on git to discover the top-level checkout directory.
 $repoRoot = $PSScriptRoot
 $versionFile = Join-Path $repoRoot ".zutils-version"
-if (-not (Test-Path -LiteralPath $versionFile)) {
-    throw "Error: $versionFile not found."
+
+# Resolve the pinned nanvix-zutil version. `.zutils-version` at the repo
+# root is the sole source of truth: no env-var override, no GitHub fetch.
+# Downstream consumers commit this file; CI and developers see the same
+# pin without ambient configuration.
+function Resolve-ZutilVersion {
+    if (-not (Test-Path -LiteralPath $versionFile)) {
+        throw "Error: $versionFile not found.`n       Create it with a pinned nanvix-zutil version, e.g. 'v0.10.2'."
+    }
+    $content = Get-Content -LiteralPath $versionFile -Raw
+    $raw = if ($null -eq $content) { "" } else { $content.Trim() }
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        throw "Error: $versionFile is empty."
+    }
+    if ($raw -notmatch '^v?\d+\.\d+\.\d+([.-][A-Za-z0-9.-]+)?$') {
+        throw "Error: invalid nanvix-zutil version '$raw' in $versionFile (expected vX.Y.Z)."
+    }
+    return $raw
 }
-$zutilVersion = (Get-Content -LiteralPath $versionFile -Raw).Trim() -replace "^v", ""
+
+$rawZutilVersion = Resolve-ZutilVersion
+$zutilVersion = $rawZutilVersion -replace "^v", ""
+
 $venvDir = Join-Path $repoRoot ".nanvix\venv"
 $venvPython = Join-Path $venvDir "Scripts\python.exe"
 $venvZutil = Join-Path $venvDir "Scripts\nanvix-zutil.exe"
@@ -38,56 +57,119 @@ catch {
     $null
 }
 
-function Find-Python312 {
-    $candidates = @(
-        @{ Command = "py"; Prefix = @("-3.12") },
-        @{ Command = "python3.12"; Prefix = @() },
-        @{ Command = "python"; Prefix = @() },
-        @{ Command = "python3"; Prefix = @() }
-    )
-    foreach ($candidate in $candidates) {
-        if (-not (Get-Command $candidate.Command -ErrorAction SilentlyContinue)) {
-            continue
+# Extract --with-zutils PATH before forwarding to nanvix-zutil.
+#
+# --with-zutils PATH (optional): install nanvix-zutil from a local source
+# tree (editable) instead of fetching the pinned wheel from GitHub Releases.
+# Useful when iterating on zutils itself against a downstream consumer repo.
+#
+#   .\z.ps1 --with-zutils C:\src\zutils build
+#   .\z.ps1 --with-zutils=C:\src\zutils build
+#
+# The path must point at a nanvix-zutil source checkout (a directory
+# containing pyproject.toml).  The venv version-match check is bypassed; the
+# editable install is rebuilt only when the recorded source path changes.
+$withZutils = $null
+$filteredArgs = [System.Collections.Generic.List[string]]::new()
+$i = 0
+while ($i -lt $ZArgs.Count) {
+    if ($ZArgs[$i] -eq '--with-zutils') {
+        if ($i + 1 -ge $ZArgs.Count) {
+            throw "ERROR: --with-zutils requires a path argument"
         }
-        $checkArgs = @($candidate.Prefix) + @(
-            "-c",
-            "import sys; raise SystemExit(sys.version_info < (3, 12))"
-        )
-        & $candidate.Command @checkArgs 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return $candidate
-        }
+        $withZutils = $ZArgs[$i + 1]
+        $i += 2
     }
-    throw "Python 3.12 or newer is required by nanvix-zutil."
+    elseif ($ZArgs[$i] -match '^--with-zutils=(.+)$') {
+        $withZutils = $Matches[1]
+        $i++
+    }
+    else {
+        $filteredArgs.Add($ZArgs[$i])
+        $i++
+    }
 }
 
-function Bootstrap {
-    # Pin nanvix-zutil version for reproducible bootstrapping.
-    Write-Information "nanvix-zutil not found -- bootstrapping nanvix-zutil==${zutilVersion}..." -InformationAction Continue
+if ($withZutils) {
+    $resolved = Resolve-Path -LiteralPath $withZutils -ErrorAction SilentlyContinue
+    if (-not $resolved) {
+        throw "ERROR: --with-zutils path does not exist: $withZutils"
+    }
+    if (-not (Test-Path -LiteralPath $resolved.Path -PathType Container)) {
+        throw "ERROR: --with-zutils is not a directory: $($resolved.Path)"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $resolved.Path 'pyproject.toml'))) {
+        throw "ERROR: --with-zutils is not a Python source tree (no pyproject.toml): $($resolved.Path)"
+    }
+    $withZutils = $resolved.Path
+}
 
-    $wheelUrl = "https://github.com/nanvix/zutils/releases/download/v${zutilVersion}/nanvix_zutil-${zutilVersion}-py3-none-any.whl"
-
-    $python = Find-Python312
+function NewZutilVenv {
+    # Discover a Python 3 interpreter and (re)create the venv.
     $venvArgs = @("-m", "venv")
     if (Test-Path $venvDir) {
         $venvArgs += "--clear"
     }
     $venvArgs += $venvDir
 
-    $pythonArgs = @($python.Prefix) + $venvArgs
-    & $python.Command @pythonArgs
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        & py -3 @venvArgs
+    }
+    elseif (Get-Command python -ErrorAction SilentlyContinue) {
+        & python @venvArgs
+    }
+    elseif (Get-Command python3 -ErrorAction SilentlyContinue) {
+        & python3 @venvArgs
+    }
+    else {
+        throw "Python 3 not found. Install Python 3 and ensure py, python, or python3 is on PATH."
+    }
     if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
         throw "venv creation failed (exit code $LASTEXITCODE)"
     }
+}
+
+function Bootstrap {
+    param([string]$Reason = "not found")
+    # nanvix-zutil version comes from .zutils-version (resolved above).
+    Write-Information "nanvix-zutil ${Reason} -- bootstrapping nanvix-zutil==${zutilVersion}..." -InformationAction Continue
+
+    $wheelUrl = "https://github.com/nanvix/zutils/releases/download/v${zutilVersion}/nanvix_zutil-${zutilVersion}-py3-none-any.whl"
+    NewZutilVenv
     & $venvPython -m pip install --quiet "nanvix-zutil[lint] @ $($wheelUrl)"
     if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
         throw "pip install failed (exit code $LASTEXITCODE)"
     }
 }
 
+function BootstrapLocal {
+    # Install nanvix-zutil from $withZutils as an editable install.
+    Write-Information "nanvix-zutil -- installing editable from ${withZutils}..." -InformationAction Continue
+    NewZutilVenv
+    & $venvPython -m pip install --quiet -e "$($withZutils)[lint]"
+    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        throw "pip install (editable) failed (exit code $LASTEXITCODE)"
+    }
+    Set-Content -LiteralPath (Join-Path $venvDir '.with-zutils') -Value $withZutils -NoNewline
+}
+
 # Prefer the venv copy if it exists; otherwise use the global install.
 $bin = $null
-if ((-not (Test-Path $venvDir)) -and (-not $zutilGlobalVersion)) {
+if ($withZutils) {
+    $zutilsMarker = Join-Path $venvDir '.with-zutils'
+    $recordedZutils = if (Test-Path -LiteralPath $zutilsMarker) {
+        (Get-Content -LiteralPath $zutilsMarker -Raw).Trim()
+    }
+    else { $null }
+    if ((-not (Test-Path $venvZutil)) -or ($recordedZutils -ne $withZutils)) {
+        BootstrapLocal
+    }
+    if (-not (Test-Path $venvZutil)) {
+        throw "BootstrapLocal completed but $venvZutil not found."
+    }
+    $bin = $venvZutil
+}
+elseif ((-not (Test-Path $venvDir)) -and (-not $zutilGlobalVersion)) {
     Bootstrap
     if (-not (Test-Path $venvZutil)) {
         throw "Bootstrap completed but $venvZutil not found."
@@ -124,7 +206,7 @@ else {
     $bin = "nanvix-zutil"
     if ($zutilGlobalVersion -ne "nanvix-zutil ${zutilVersion}") {
         Write-Warning "nanvix-zutil global install does not match expected version. Expected ${zutilVersion}, found ${zutilGlobalVersion}."
-        Bootstrap
+        Bootstrap "version mismatch"
         if (-not (Test-Path $venvZutil)) {
             throw "Bootstrap completed but $venvZutil not found."
         }
@@ -132,11 +214,13 @@ else {
     }
 }
 
+$filteredArray = $filteredArgs.ToArray()
+
 if ($bin -eq $venvZutil) {
-    & $venvPython -c $ShimCode @ZArgs
+    & $venvPython -c $ShimCode @filteredArray
 }
 else {
-    & $bin @ZArgs
+    & $bin @filteredArray
 }
 
 $ec = $LASTEXITCODE
@@ -144,7 +228,7 @@ $ec = $LASTEXITCODE
 # On Windows the venv's python.exe is locked while it runs, so the Python
 # distclean command cannot delete it.  Now that the interpreter has exited the
 # lock is released and the shell can safely remove the venv directory.
-if ($ZArgs -and $ZArgs[0] -eq "distclean" -and (Test-Path $venvDir)) {
+if ($filteredArray -and $filteredArray[0] -eq "distclean" -and (Test-Path $venvDir)) {
     Remove-Item $venvDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
