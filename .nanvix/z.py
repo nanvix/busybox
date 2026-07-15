@@ -16,7 +16,7 @@ from nanvix_zutil import (
     ZScript,
     run,
 )
-from nanvix_zutil.paths import bin_out, out_dir, repo_root, test_out
+from nanvix_zutil.paths import out_dir, regular_out, repo_root, test_out
 
 
 class BusyBoxBuild(ZScript):
@@ -44,7 +44,7 @@ class BusyBoxBuild(ZScript):
             "busybox.links",
             ".config",
             str((out_dir() / "bin" / "busybox.elf").relative_to(root)),
-            str((bin_out() / "busybox.elf").relative_to(root)),
+            str((regular_out() / "bin" / "busybox.elf").relative_to(root)),
             str((test_out() / "busybox.elf").relative_to(root)),
             str((test_out() / "busybox.links").relative_to(root)),
             str((test_out() / "busybox.config").relative_to(root)),
@@ -61,7 +61,7 @@ class BusyBoxBuild(ZScript):
             ".nanvix/Makefile.nanvix",
             f"NANVIX_TOOLCHAIN={TOOLCHAIN_CONTAINER_PATH}",
             f"OUT_DIR={translate(out_dir())}",
-            f"BIN_OUT={translate(bin_out())}",
+            f"BIN_OUT={translate(regular_out() / 'bin')}",
             f"TEST_OUT={translate(test_out())}",
             *targets,
         ]
