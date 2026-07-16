@@ -230,7 +230,6 @@ class BusyBoxTests:
         """Run every CONFIG_UNIT_TEST test in the Nanvix guest."""
         log.info("=== BusyBox unit tests on Nanvix ===")
         initrd = make_initrd(
-            self.script,
             self._binary(),
             test_out(),
             args=InitRdArgs(app_args=["unit"]),
@@ -503,7 +502,6 @@ class BusyBoxTests:
 
             for guest_runner in (smoke_runner, runner):
                 initrd = make_initrd(
-                    self.script,
                     binary,
                     test_out(),
                     args=InitRdArgs(
