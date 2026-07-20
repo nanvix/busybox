@@ -1,7 +1,10 @@
 # Copyright(c) The Maintainers of Nanvix.
 # Licensed under the MIT License.
 
-"""BusyBox artifact, unit, and target integration tests."""
+"""Test lifecycle for the busybox ZScript.
+
+BusyBox artifact, unit, and target integration tests.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +17,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-from nanvix_zutil import CFG_SYSROOT, ZScript, log
+from nanvix_zutil import CFG_SYSROOT, log
 from nanvix_zutil.exitcodes import EXIT_TEST_FAILURE
 from nanvix_zutil.helpers import InitRdArgs, make_initrd, run
 from nanvix_zutil.paths import repo_root, test_out
+
+from .config import ConfigMixin
+
+__all__ = ("TestMixin",)
 
 _ALL_PHASES = ("test-smoke", "test-unit", "test-integration")
 _UNSUPPORTED_SHELL = re.compile(r"(?<!\|)\|(?!\|)|\$\(|`")
@@ -101,15 +108,12 @@ _SMOKE_CASES = (
 )
 
 
-class BusyBoxTests:
-    """Run host-side checks and tests inside Nanvix."""
+class TestMixin(ConfigMixin):
+    """``./z test`` — host-side checks and tests inside Nanvix."""
 
-    def __init__(self, script: ZScript) -> None:
-        self.script = script
-
-    def run(self, targets: list[str]) -> None:
+    def test(self) -> None:
         """Run all phases, or the phases named after ``--``."""
-        phases = list(targets) if targets else list(_ALL_PHASES)
+        phases = list(self.targets) if self.targets else list(_ALL_PHASES)
         if "test-all" in phases:
             phases = list(_ALL_PHASES)
 
@@ -135,7 +139,7 @@ class BusyBoxTests:
         return binary
 
     def _sysroot(self) -> Path:
-        configured = self.script.config.get(CFG_SYSROOT, "")
+        configured = self.config.get(CFG_SYSROOT, "")
         if not configured:
             log.fatal(
                 "Nanvix sysroot is not configured.",

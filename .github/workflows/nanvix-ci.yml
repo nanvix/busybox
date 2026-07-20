@@ -31,11 +31,11 @@ jobs:
       platforms: '["microvm"]'
       process-modes: '["standalone"]'
       memory-sizes: '["256mb"]'
-      windows-matrix-exclude: '[]'
-      skip-full-test-modes: '[]'
+      windows-matrix-exclude: "[]"
+      skip-full-test-modes: "[]"
       caller-event-name: ${{ github.event_name }}
       windows-test: true
-      python-paths: ".nanvix/z.py .nanvix/_test.py"
+      python-paths: ".nanvix/z.py .nanvix/src/*.py"
       test-output-globs: '["**/*.elf","**/*.so","**/busybox.links","**/busybox.config"]'
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
@@ -48,11 +48,11 @@ jobs:
       platforms: '["microvm"]'
       process-modes: '["standalone"]'
       memory-sizes: '["256mb"]'
-      windows-matrix-exclude: '[]'
-      skip-full-test-modes: '[]'
-      caller-event-name: 'schedule'
+      windows-matrix-exclude: "[]"
+      skip-full-test-modes: "[]"
+      caller-event-name: "schedule"
       windows-test: true
-      python-paths: ".nanvix/z.py .nanvix/_test.py"
+      python-paths: ".nanvix/z.py .nanvix/src/*.py"
       test-output-globs: '["**/*.elf","**/*.so","**/busybox.links","**/busybox.config"]'
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
