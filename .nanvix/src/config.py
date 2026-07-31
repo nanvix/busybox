@@ -17,6 +17,7 @@ from nanvix_zutil import (
     TOOLCHAIN_CONTAINER_PATH,
     DockerConfig,
     ZScript,
+    translate_path,
 )
 from nanvix_zutil.paths import out_dir, regular_out, repo_root, test_out
 
@@ -57,7 +58,7 @@ class ConfigMixin(ZScript):
 
     def _make_args(self, *targets: str) -> list[str]:
         def translate(path: Path) -> PurePosixPath | Path:
-            return self.docker.translate_path(path) if self.docker else path
+            return translate_path(self.docker.mounts, path) if self.docker else path
 
         return [
             "make",
