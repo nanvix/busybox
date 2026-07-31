@@ -16,7 +16,7 @@ module:
 
 from __future__ import annotations
 
-from nanvix_zutil import run
+from nanvix_zutil import DockerConfig, run
 from nanvix_zutil.paths import repo_root
 
 from src.test import TestMixin
@@ -25,13 +25,14 @@ from src.test import TestMixin
 class BusyBoxBuild(TestMixin):
     """Build BusyBox with the pinned Nanvix C SDK."""
 
-    def build(self) -> None:
+    def build(self, docker: DockerConfig) -> None:
         """Cross-compile and stage busybox.elf."""
-        run(*self._make_args("all"), cwd=repo_root(), docker=self.docker)
+        docker.output_files = self._docker_output_files()
+        run(*self._make_args(docker, "all"), cwd=repo_root(), docker=docker)
 
     def clean(self) -> None:
         """Remove BusyBox and zutils build outputs."""
-        run(*self._make_args("clean"), cwd=repo_root(), docker=self.docker)
+        run(*self._make_args(None, "clean"), cwd=repo_root())
 
 
 if __name__ == "__main__":
