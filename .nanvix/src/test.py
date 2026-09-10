@@ -260,9 +260,6 @@ class TestMixin(ConfigMixin):
             shutil.copy2(binary, staged_binary)
             os.link(staged_binary, bin_dir / "busybox.elf")
             os.link(staged_binary, ramfs_root / "busybox")
-            dev_dir = ramfs_root / "dev"
-            dev_dir.mkdir()
-            (dev_dir / "null").write_bytes(b"")
             fixtures = ramfs_root / "fixtures"
             fixtures.mkdir()
             (fixtures / "hello.txt").write_text(
